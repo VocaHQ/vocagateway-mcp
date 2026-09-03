@@ -43,6 +43,19 @@ uv run vocagateway-mcp
 destination before it opens an audio file. The server does not log bearer tokens,
 audio bytes, or transcript content.
 
+### Interactive Inspector test
+
+With a local VocaGateway running at `127.0.0.1:8765`, launch the Inspector with
+the included wrapper. It loads the existing local gateway token without printing
+it and avoids relying on an editable-package console-script wrapper:
+
+```sh
+npx @modelcontextprotocol/inspector bash \
+  /absolute/path/to/vocagateway-mcp/scripts/inspect-local.sh
+```
+
+Connect, then call `get_gateway_status`, `list_models`, and `transcribe_file`.
+
 Container images use the same stdio entry point:
 
 ```sh
