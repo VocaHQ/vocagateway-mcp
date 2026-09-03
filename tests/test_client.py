@@ -96,6 +96,7 @@ async def test_transcription_uploads_file_and_returns_only_text(tmp_path: Path) 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/audio/transcriptions"
         assert request.headers["authorization"] == f"Bearer {TOKEN}"
+        assert b"Content-Type: audio/wav" in request.content
         assert b"audio bytes" in request.content
         return httpx.Response(200, json={"text": "private transcript"})
 

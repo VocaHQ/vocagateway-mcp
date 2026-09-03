@@ -108,7 +108,7 @@ class GatewayClient:
         path = Path(file_path).expanduser().resolve()
         if not path.is_file():
             raise GatewayError("audio_file_path must be an existing regular file.")
-        mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        mime_type = _audio_mime_type(path)
         try:
             async with httpx.AsyncClient(
                 base_url=self.settings.normalized_url,
@@ -157,3 +157,13 @@ class GatewayClient:
         if response.is_error:
             raise GatewayError(f"VocaGateway request failed with HTTP {response.status_code}.")
         return self._json_only(response)
+
+
+def _audio_mime_type(path: Path) -> str:
+    """Use VocaGateway's accepted MIME labels, including macOS's WAV alias."""
+    detected = mimetypes.guess_type(path.name)[0]
+    aliases = {
+        "audio/x-wav": "audio/wav",
+        "audio/x-m4a": "audio/m4a",
+    }
+    return aliases.get(detected or "", detected or "application/octet-stream")
