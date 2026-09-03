@@ -18,7 +18,42 @@ MCP server for a self-hosted [VocaGateway](https://github.com/VocaHQ/vocagateway
 
 This talks to a gateway you run. It is not the gateway, and it is not on-device dictation. Audio leaves the machine running the MCP server and goes to the gateway you pointed it at. There is no Voca account and no hosted Voca relay.
 
-Nothing here is implemented yet. v1 should cover:
+## Development
+
+The initial implementation is a local stdio MCP server. It is intentionally a
+thin client over the gateway HTTP API so the same core can later power a
+self-hosted Streamable HTTP transport.
+
+```sh
+uv sync --all-groups
+uv run ruff check .
+uv run pytest
+```
+
+Configure the destination and its existing bearer token in the MCP host
+environment. Do not put either value in source control:
+
+```sh
+export VOCAGATEWAY_URL=https://gateway.example.com
+export VOCAGATEWAY_TOKEN='your-existing-gateway-token'
+uv run vocagateway-mcp
+```
+
+`transcribe_file` requires `confirm_gateway_url` to exactly match the configured
+destination before it opens an audio file. The server does not log bearer tokens,
+audio bytes, or transcript content.
+
+Container images use the same stdio entry point:
+
+```sh
+docker build --tag vocagateway-mcp:dev .
+docker run --rm -i \
+  -e VOCAGATEWAY_URL \
+  -e VOCAGATEWAY_TOKEN \
+  vocagateway-mcp:dev
+```
+
+v1 covers:
 
 - Gateway health/readiness and which engine is active
 - Installed/available models
