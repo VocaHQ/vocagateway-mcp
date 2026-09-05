@@ -20,6 +20,25 @@ def transport_for(handler):
     return httpx.MockTransport(handler)
 
 
+class CountingTransport(httpx.AsyncBaseTransport):
+    def __init__(self) -> None:
+        self.requests: list[httpx.Request] = []
+        self.close_count = 0
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"engine": "whisper.cpp", "engine_ready": True})
+        if request.url.path == "/health/ready":
+            return httpx.Response(200, json={"status": "ready"})
+        if request.url.path == "/v1/admin/models":
+            return httpx.Response(200, json=[])
+        raise AssertionError(f"Unexpected path: {request.url.path}")
+
+    async def aclose(self) -> None:
+        self.close_count += 1
+
+
 def test_settings_normalize_gateway_url_and_token() -> None:
     settings = GatewaySettings(
         url="HTTP://Gateway.Example.Test:8765/",
@@ -65,6 +84,26 @@ async def test_status_reports_destination_and_unready_engine() -> None:
         "readiness": "not_ready",
         "warmup_state": "pending",
     }
+
+
+@pytest.mark.asyncio
+async def test_client_reuses_one_transport_and_closes_it_once() -> None:
+    transport = CountingTransport()
+
+    async with GatewayClient(SETTINGS, transport=transport) as client:
+        await client.status()
+        await client.list_models()
+        assert transport.close_count == 0
+
+    assert [request.url.path for request in transport.requests] == [
+        "/health",
+        "/health/ready",
+        "/v1/admin/models",
+    ]
+    assert "authorization" not in transport.requests[0].headers
+    assert "authorization" not in transport.requests[1].headers
+    assert transport.requests[2].headers["authorization"] == f"Bearer {TOKEN}"
+    assert transport.close_count == 1
 
 
 @pytest.mark.asyncio

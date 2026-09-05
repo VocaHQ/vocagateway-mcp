@@ -77,11 +77,27 @@ class GatewayClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.settings = settings
-        self._transport = transport
+        self._http = httpx.AsyncClient(
+            base_url=self.settings.normalized_url,
+            timeout=httpx.Timeout(15.0, connect=5.0),
+            transport=transport,
+        )
+
+    async def __aenter__(self) -> GatewayClient:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        """Release pooled connections owned by this gateway client."""
+        await self._http.aclose()
 
     async def status(self) -> dict[str, Any]:
-        health = await self._get_json("/health", authenticated=False)
-        readiness = await self._get_json("/health/ready", authenticated=False, allow_503=True)
+        health = await self._request_json("GET", "/health", authenticated=False)
+        readiness = await self._request_json(
+            "GET", "/health/ready", authenticated=False, allowed_statuses={503}
+        )
         return {
             "gateway_url": self.settings.normalized_url,
             "engine": health.get("engine"),
@@ -93,7 +109,7 @@ class GatewayClient:
         }
 
     async def list_models(self) -> list[dict[str, Any]]:
-        payload = await self._get_json("/v1/admin/models", authenticated=True)
+        payload = await self._request_json("GET", "/v1/admin/models", authenticated=True)
         if not isinstance(payload, list):
             raise GatewayError("VocaGateway returned an invalid model-list response.")
         return [
@@ -128,59 +144,57 @@ class GatewayClient:
         path = _validate_audio_path(file_path)
         mime_type = _audio_mime_type(path)
         try:
-            async with httpx.AsyncClient(
-                base_url=self.settings.normalized_url,
-                headers={"Authorization": f"Bearer {self.settings.token}"},
-                timeout=httpx.Timeout(120.0, connect=10.0),
-                transport=self._transport,
-            ) as client:
-                with path.open("rb") as audio_file:
-                    response = await client.post(
-                        "/v1/audio/transcriptions",
-                        files={"file": (path.name, audio_file, mime_type)},
-                        data={"response_format": "json"},
-                    )
-        except httpx.HTTPError as error:
-            raise self._transport_error(error) from error
+            with path.open("rb") as audio_file:
+                payload = await self._request_json(
+                    "POST",
+                    "/v1/audio/transcriptions",
+                    authenticated=True,
+                    timeout=httpx.Timeout(120.0, connect=10.0),
+                    files={"file": (path.name, audio_file, mime_type)},
+                    data={"response_format": "json"},
+                )
         except OSError as error:
             raise GatewayError(f"Could not read the audio file: {path}") from error
-        payload = self._response_json(response)
         text = payload.get("text") if isinstance(payload, dict) else None
         if not isinstance(text, str):
             raise GatewayError("VocaGateway returned an invalid transcription response.")
         return {"gateway_url": self.settings.normalized_url, "text": text}
 
-    async def _get_json(self, path: str, *, authenticated: bool, allow_503: bool = False) -> Any:
+    async def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        authenticated: bool,
+        allowed_statuses: set[int] | None = None,
+        timeout: httpx.Timeout | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Make one gateway request and convert failures to safe, actionable errors."""
         headers = {"Authorization": f"Bearer {self.settings.token}"} if authenticated else {}
+        request_options = dict(kwargs)
+        if timeout is not None:
+            request_options["timeout"] = timeout
         try:
-            async with httpx.AsyncClient(
-                base_url=self.settings.normalized_url,
+            response = await self._http.request(
+                method,
+                path,
                 headers=headers,
-                timeout=httpx.Timeout(15.0, connect=5.0),
-                transport=self._transport,
-            ) as client:
-                response = await client.get(path)
+                **request_options,
+            )
         except httpx.HTTPError as error:
             raise self._transport_error(error) from error
-        if response.status_code == 503 and allow_503:
-            return self._json_only(response)
-        return self._response_json(response)
 
-    @staticmethod
-    def _json_only(response: httpx.Response) -> Any:
-        try:
-            return response.json()
-        except ValueError as error:
-            raise GatewayError("VocaGateway returned an invalid JSON response.") from error
-
-    def _response_json(self, response: httpx.Response) -> Any:
-        if response.is_error:
+        if response.is_error and response.status_code not in (allowed_statuses or set()):
             hint = _HTTP_ERROR_HINTS.get(
                 response.status_code,
                 "The gateway returned an error. Check its status and logs.",
             )
             raise GatewayError(f"VocaGateway returned HTTP {response.status_code}. {hint}")
-        return self._json_only(response)
+        try:
+            return response.json()
+        except ValueError as error:
+            raise GatewayError("VocaGateway returned an invalid JSON response.") from error
 
     def _transport_error(self, error: httpx.HTTPError) -> GatewayError:
         destination = self.settings.normalized_url

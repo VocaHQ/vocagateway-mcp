@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from mcp.server.fastmcp import FastMCP
 
 from .client import GatewayClient, GatewaySettings
 
 
 def create_server(client: GatewayClient) -> FastMCP:
-    mcp = FastMCP("VocaGateway")
+    @asynccontextmanager
+    async def lifespan(_: FastMCP) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            await client.aclose()
+
+    mcp = FastMCP("VocaGateway", lifespan=lifespan)
 
     @mcp.tool()
     async def get_gateway_status() -> dict:

@@ -67,6 +67,8 @@ Run `git diff --check` before committing.
 
 - Keep gateway-independent logic in `GatewayClient`; MCP tools should be thin
   adapters so a future Streamable HTTP transport can reuse the same client.
+- `GatewayClient` owns one reusable `httpx.AsyncClient`; route gateway calls
+  through its unified request helper and close it through the MCP lifespan.
 - Stdio is the only supported MCP transport in the current milestone.
 - `get_gateway_status` uses public gateway health endpoints.
 - `list_models` is read-only but uses the configured gateway bearer token.

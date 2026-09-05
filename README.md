@@ -173,9 +173,13 @@ MCP host
                                                 └── selected local speech engine
 ```
 
-`GatewayClient` contains configuration, HTTP, validation, and redacted errors.
-The FastMCP layer is deliberately thin so a future authenticated Streamable HTTP
-transport can reuse the same behavior without duplicating gateway logic.
+`GatewayClient` contains configuration, validation, and redacted errors. It owns
+one reusable `httpx.AsyncClient`, so status checks, model discovery, and uploads
+share connection pooling and one request/error path. The FastMCP lifespan closes
+that client cleanly when the server exits.
+
+The FastMCP tool layer is deliberately thin so a future authenticated Streamable
+HTTP transport can reuse the same gateway behavior without duplicating it.
 
 ## Privacy and security
 
