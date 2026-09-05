@@ -20,6 +20,32 @@ def transport_for(handler):
     return httpx.MockTransport(handler)
 
 
+def test_settings_normalize_gateway_url_and_token() -> None:
+    settings = GatewaySettings(
+        url="HTTP://Gateway.Example.Test:8765/",
+        token=f"  {TOKEN}  ",
+    )
+
+    assert settings.normalized_url == "http://gateway.example.test:8765"
+    assert settings.token == TOKEN
+
+
+@pytest.mark.parametrize(
+    ("url", "message"),
+    [
+        ('"http://127.0.0.1:8765"', "quote characters"),
+        ("127.0.0.1:8765", "absolute http"),
+        ("http://127.0.0.1:not-a-port", "invalid hostname or port"),
+        ("http://user:secret@127.0.0.1:8765", "must not contain credentials"),
+        ("http://127.0.0.1:8765/gateway", "gateway root"),
+        ("http://127.0.0.1:8765?token=secret", "query string or fragment"),
+    ],
+)
+def test_settings_reject_malformed_or_ambiguous_gateway_urls(url: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        GatewaySettings(url=url, token=TOKEN)
+
+
 @pytest.mark.asyncio
 async def test_status_reports_destination_and_unready_engine() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -89,6 +115,32 @@ async def test_transcription_does_not_open_audio_until_destination_is_confirmed(
 
 
 @pytest.mark.asyncio
+async def test_transcription_explains_quoted_confirmation_url(tmp_path: Path) -> None:
+    audio = tmp_path / "recording.wav"
+    audio.write_bytes(b"not opened")
+
+    with pytest.raises(DestinationConfirmationRequired, match="quote characters") as error:
+        await GatewayClient(SETTINGS).transcribe_file(
+            audio,
+            confirm_gateway_url='"https://gateway.example.test"',
+        )
+
+    assert "Expected: https://gateway.example.test" in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_transcription_explains_quoted_audio_path(tmp_path: Path) -> None:
+    audio = tmp_path / "recording.wav"
+    audio.write_bytes(b"not opened")
+
+    with pytest.raises(GatewayError, match="absolute path without quotes"):
+        await GatewayClient(SETTINGS).transcribe_file(
+            f'"{audio}"',
+            confirm_gateway_url="https://gateway.example.test",
+        )
+
+
+@pytest.mark.asyncio
 async def test_transcription_uploads_file_and_returns_only_text(tmp_path: Path) -> None:
     audio = tmp_path / "recording.wav"
     audio.write_bytes(b"audio bytes")
@@ -108,11 +160,62 @@ async def test_transcription_uploads_file_and_returns_only_text(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+async def test_transcription_explains_connection_failure(tmp_path: Path) -> None:
+    audio = tmp_path / "recording.wav"
+    audio.write_bytes(b"audio bytes")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("All connection attempts failed", request=request)
+
+    with pytest.raises(GatewayError, match="Verify the gateway is running") as error:
+        await GatewayClient(SETTINGS, transport=transport_for(handler)).transcribe_file(
+            audio,
+            confirm_gateway_url="https://gateway.example.test",
+        )
+
+    assert "All connection attempts failed" not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_transcription_explains_timeout(tmp_path: Path) -> None:
+    audio = tmp_path / "recording.wav"
+    audio.write_bytes(b"audio bytes")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("low-level timeout", request=request)
+
+    with pytest.raises(GatewayError, match="timed out. Verify it is ready") as error:
+        await GatewayClient(SETTINGS, transport=transport_for(handler)).transcribe_file(
+            audio,
+            confirm_gateway_url="https://gateway.example.test",
+        )
+
+    assert "low-level timeout" not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_transcription_explains_gateway_not_ready(tmp_path: Path) -> None:
+    audio = tmp_path / "recording.wav"
+    audio.write_bytes(b"audio bytes")
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": {"message": "sensitive details"}})
+
+    with pytest.raises(GatewayError, match="speech engine is not ready") as error:
+        await GatewayClient(SETTINGS, transport=transport_for(handler)).transcribe_file(
+            audio,
+            confirm_gateway_url="https://gateway.example.test",
+        )
+
+    assert "sensitive details" not in str(error.value)
+
+
+@pytest.mark.asyncio
 async def test_gateway_errors_do_not_echo_response_body() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(401, text=f"token was {TOKEN}")
 
-    with pytest.raises(GatewayError, match="HTTP 401") as error:
+    with pytest.raises(GatewayError, match="Verify VOCAGATEWAY_TOKEN") as error:
         await GatewayClient(SETTINGS, transport=transport_for(handler)).list_models()
 
     assert TOKEN not in str(error.value)

@@ -107,6 +107,25 @@ In the Inspector:
 The audio path is local to the machine running this stdio MCP server. A hosted
 server will need a different, remote-safe audio input contract.
 
+### Error guidance
+
+The MCP returns remediation-oriented errors without echoing gateway response
+bodies:
+
+| Error | What to check |
+| --- | --- |
+| `confirm_gateway_url contains quote characters` | In Inspector form mode, paste the raw URL without `"` characters |
+| `Gateway destination mismatch` | Call `get_gateway_status` and confirm that exact `gateway_url` |
+| `Could not connect to VocaGateway` | Start the gateway and verify its hostname and port |
+| `HTTP 401` | Verify `VOCAGATEWAY_TOKEN` matches the running gateway |
+| `HTTP 404` | Verify the base URL and upgrade to a gateway with `/v1/audio/transcriptions` |
+| `HTTP 413` / `415` / `422` | Check the upload size, supported audio type, duration, and whether the file is decodable |
+| `HTTP 503` | Call `get_gateway_status`; the selected speech engine is not ready |
+
+Configured and confirmed gateway URLs must be absolute `http` or `https` URLs
+pointing at the gateway root. Credentials, paths, query strings, fragments,
+whitespace, invalid ports, and surrounding quotes are rejected explicitly.
+
 ## Development and verification
 
 ```sh
