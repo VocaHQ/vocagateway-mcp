@@ -49,6 +49,15 @@ def test_settings_normalize_gateway_url_and_token() -> None:
     assert settings.token == TOKEN
 
 
+@pytest.mark.asyncio
+async def test_gateway_client_does_not_inherit_ambient_proxy_settings() -> None:
+    client = GatewayClient(SETTINGS, transport=httpx.MockTransport(lambda _: None))
+    try:
+        assert client._http._trust_env is False
+    finally:
+        await client.aclose()
+
+
 @pytest.mark.parametrize(
     ("url", "message"),
     [

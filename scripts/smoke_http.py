@@ -22,7 +22,6 @@ EXPECTED_TOOLS = {
     "download_model",
     "cancel_model_download",
     "select_model",
-    "delete_model",
     "update_engine_config",
 }
 

@@ -29,7 +29,7 @@ Two transport-specific modes are available:
 
 - **Local stdio:** the original status, model-list, and completed-file
   transcription tools.
-- **Streamable HTTP:** nine authenticated gateway observation and management
+- **Streamable HTTP:** eight authenticated gateway observation and management
   tools. It does not expose transcription or local filesystem access.
 
 ### Local stdio tools
@@ -55,12 +55,11 @@ where audio will be sent and prevents an unnoticed destination change.
 | `download_model` | `gateway:manage` | Start a catalog model download |
 | `cancel_model_download` | `gateway:manage` | Cancel an active model download |
 | `select_model` | `gateway:manage` | Activate an installed model and wait for warmup |
-| `delete_model` | `gateway:manage` | Delete an inactive installed model after exact confirmation |
 | `update_engine_config` | `gateway:manage` | Change engine and compute settings |
 
 Hosted mutations require `confirm_gateway_url` to match the configured gateway.
-Deletion also requires `confirm_model_id` to match exactly and refuses to delete
-an active or downloading model.
+Model deletion remains unavailable until VocaGateway provides an atomic endpoint
+that refuses to delete active or downloading models.
 
 Not included: hosted transcription, live transcription streaming, transcript
 history, token administration, custom model URLs, or a Voca cloud relay.
@@ -82,7 +81,8 @@ uv sync --locked --all-groups
 ```
 
 Configure the gateway destination and token in the MCP host environment. Do not
-put either value in source control:
+put either value in source control. Hosted mode requires HTTPS for a non-loopback
+gateway destination:
 
 ```sh
 export VOCAGATEWAY_URL=http://127.0.0.1:8765
@@ -136,7 +136,8 @@ receives only `gateway:read`. Every MCP request must send one as an
 Non-loopback deployments require an HTTPS public URL. Terminate TLS in a trusted
 reverse proxy or private-network ingress and forward traffic to the MCP process.
 The server enables DNS-rebinding protection and accepts request bodies up to one
-MiB because hosted tools carry management JSON, not audio.
+MiB because hosted tools carry management JSON, not audio. Outbound gateway
+requests do not inherit ambient HTTP proxy settings.
 
 This release uses operator-provisioned bearer tokens. It publishes MCP protected
 resource metadata but does not implement an interactive authorization server or

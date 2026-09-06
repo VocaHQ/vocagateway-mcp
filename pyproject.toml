@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "VocaHQ" }]
 dependencies = [
   "httpx>=0.28,<1",
-  "mcp>=1.16,<2",
+  "mcp>=1.29.1,<2",
 ]
 
 [project.scripts]

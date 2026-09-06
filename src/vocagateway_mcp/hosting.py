@@ -13,6 +13,7 @@ from mcp.server.auth.provider import AccessToken
 READ_SCOPE = "gateway:read"
 MANAGE_SCOPE = "gateway:manage"
 _MINIMUM_TOKEN_LENGTH = 32
+_MAXIMUM_TOKEN_LENGTH = 512
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +43,7 @@ class HostedSettings:
             if self.read_only_token is not None
             else None
         )
-        if read_only_token is not None and secrets.compare_digest(read_only_token, access_token):
+        if read_only_token is not None and _tokens_equal(read_only_token, access_token):
             raise ValueError("VOCAMCP_READ_ONLY_TOKEN must differ from VOCAMCP_ACCESS_TOKEN.")
         public_host = urlsplit(public_url).hostname or ""
         if (not _is_loopback_host(host) or not _is_loopback_host(public_host)) and urlsplit(
@@ -98,18 +99,23 @@ class StaticTokenVerifier:
 
     def __init__(self, settings: HostedSettings) -> None:
         self.settings = settings
+        self._access_token = settings.access_token.encode("ascii")
+        self._read_only_token = (
+            settings.read_only_token.encode("ascii") if settings.read_only_token else None
+        )
 
     async def verify_token(self, token: str) -> AccessToken | None:
-        if secrets.compare_digest(token, self.settings.access_token):
+        candidate = _bearer_token_bytes(token)
+        if candidate is None:
+            return None
+        if secrets.compare_digest(candidate, self._access_token):
             return AccessToken(
                 token=token,
                 client_id="vocamcp-operator",
                 scopes=[READ_SCOPE, MANAGE_SCOPE],
                 resource=self.settings.public_url,
             )
-        if self.settings.read_only_token and secrets.compare_digest(
-            token, self.settings.read_only_token
-        ):
+        if self._read_only_token and secrets.compare_digest(candidate, self._read_only_token):
             return AccessToken(
                 token=token,
                 client_id="vocamcp-read-only",
@@ -124,7 +130,46 @@ def _validate_token(value: str, field_name: str) -> str:
         raise ValueError(f"{field_name} must not have surrounding whitespace.")
     if len(value) < _MINIMUM_TOKEN_LENGTH:
         raise ValueError(f"{field_name} must contain at least {_MINIMUM_TOKEN_LENGTH} characters.")
+    if len(value) > _MAXIMUM_TOKEN_LENGTH:
+        raise ValueError(f"{field_name} must contain at most {_MAXIMUM_TOKEN_LENGTH} characters.")
+    if (
+        not value.isascii()
+        or not value.isprintable()
+        or any(character.isspace() for character in value)
+    ):
+        raise ValueError(
+            f"{field_name} must contain only printable ASCII characters without whitespace."
+        )
     return value
+
+
+def validate_hosted_gateway(settings: HostedSettings, gateway_url: str, gateway_token: str) -> None:
+    """Keep hosted MCP credentials and the privileged gateway hop separate and secure."""
+    for field_name, mcp_token in (
+        ("VOCAMCP_ACCESS_TOKEN", settings.access_token),
+        ("VOCAMCP_READ_ONLY_TOKEN", settings.read_only_token),
+    ):
+        if mcp_token is not None and _tokens_equal(mcp_token, gateway_token):
+            raise ValueError(f"{field_name} must differ from VOCAGATEWAY_TOKEN.")
+
+    parsed = urlsplit(gateway_url)
+    if parsed.scheme != "https" and not _is_loopback_host(parsed.hostname or ""):
+        raise ValueError(
+            "VOCAGATEWAY_URL must use https for hosted mode unless it points to loopback."
+        )
+
+
+def _bearer_token_bytes(value: str) -> bytes | None:
+    if not value or len(value) > _MAXIMUM_TOKEN_LENGTH:
+        return None
+    try:
+        return value.encode("ascii")
+    except UnicodeEncodeError:
+        return None
+
+
+def _tokens_equal(left: str, right: str) -> bool:
+    return secrets.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
 
 
 def _normalize_public_url(value: str) -> str:

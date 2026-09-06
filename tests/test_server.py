@@ -41,13 +41,9 @@ async def test_local_and_hosted_servers_register_transport_specific_tools() -> N
         "download_model",
         "cancel_model_download",
         "select_model",
-        "delete_model",
         "update_engine_config",
     }
     assert "transcribe_file" not in hosted_names
-    delete_tool = next(tool for tool in hosted_tools if tool.name == "delete_model")
-    assert delete_tool.annotations is not None
-    assert delete_tool.annotations.destructiveHint is True
     config_tool = next(tool for tool in hosted_tools if tool.name == "update_engine_config")
     assert config_tool.inputSchema["properties"]["cpu_threads"]["minimum"] == 0
     assert config_tool.inputSchema["properties"]["cpu_threads"]["maximum"] == 256
@@ -72,6 +68,26 @@ async def test_hosted_http_requires_bearer_authentication() -> None:
     assert response.status_code == 401
     assert response.json()["error"] == "invalid_token"
     assert "resource_metadata" in response.headers["www-authenticate"]
+
+
+@pytest.mark.asyncio
+async def test_hosted_http_rejects_non_ascii_bearer_as_unauthorized() -> None:
+    client = GatewayClient(GATEWAY_SETTINGS, transport=httpx.MockTransport(lambda _: None))
+    mcp = create_hosted_server(client, HOSTED_SETTINGS)
+    app = mcp.streamable_http_app()
+    headers = [
+        (b"authorization", b"Bearer invalid-\xff-token"),
+        (b"accept", b"application/json, text/event-stream"),
+    ]
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://127.0.0.1:8000",
+        ) as http:
+            response = await http.post("/mcp", headers=headers, json=_initialize_request())
+
+    assert response.status_code == 401
+    assert response.json()["error"] == "invalid_token"
 
 
 @pytest.mark.asyncio

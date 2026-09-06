@@ -133,6 +133,7 @@ class GatewayClient:
             base_url=self.settings.normalized_url,
             timeout=httpx.Timeout(15.0, connect=5.0),
             transport=transport,
+            trust_env=False,
         )
 
     async def __aenter__(self) -> GatewayClient:
@@ -288,38 +289,6 @@ class GatewayClient:
             "gateway_url": self.settings.normalized_url,
             "model_id": model_id,
             "engine": _safe_engine(result.get("engine")),
-        }
-
-    async def delete_model(
-        self,
-        model_id: str,
-        *,
-        confirm_model_id: str,
-        confirm_gateway_url: str,
-    ) -> dict[str, Any]:
-        model_id = _validate_model_id(model_id)
-        if confirm_model_id != model_id:
-            raise GatewayChangeConfirmationRequired(
-                "Model was not deleted. confirm_model_id must exactly match model_id."
-            )
-        self._confirm_gateway_change(confirm_gateway_url)
-        model = await self._find_model(model_id)
-        if model.get("active") is True:
-            raise GatewayError("The active model cannot be deleted. Select another model first.")
-        if model.get("state") == "downloading":
-            raise GatewayError("A downloading model cannot be deleted. Cancel its download first.")
-        if model.get("state") != "installed":
-            raise GatewayError(f"Model {model_id} is not installed.")
-        payload = await self._request_json(
-            "DELETE",
-            f"/v1/admin/models/{_model_path(model_id)}",
-            authenticated=True,
-        )
-        result = _require_mapping(payload, "model-deletion")
-        return {
-            "gateway_url": self.settings.normalized_url,
-            "model_id": model_id,
-            "deleted": result.get("deleted"),
         }
 
     async def update_engine_config(

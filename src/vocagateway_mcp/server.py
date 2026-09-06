@@ -18,7 +18,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .client import GatewayClient, GatewaySettings
-from .hosting import MANAGE_SCOPE, READ_SCOPE, HostedSettings, StaticTokenVerifier
+from .hosting import (
+    MANAGE_SCOPE,
+    READ_SCOPE,
+    HostedSettings,
+    StaticTokenVerifier,
+    validate_hosted_gateway,
+)
 
 EngineName = Literal[
     "auto",
@@ -37,7 +43,6 @@ MaximumSize = Literal["100mb", "300mb", "800mb", "1500mb"]
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)
 MUTATION = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True)
-DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True)
 
 
 def create_server(client: GatewayClient) -> FastMCP:
@@ -78,6 +83,12 @@ def create_server(client: GatewayClient) -> FastMCP:
 
 def create_hosted_server(client: GatewayClient, settings: HostedSettings) -> FastMCP:
     """Create the authenticated, management-only Streamable HTTP server."""
+
+    validate_hosted_gateway(
+        settings,
+        client.settings.normalized_url,
+        client.settings.token,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastMCP) -> AsyncIterator[None]:
@@ -182,20 +193,6 @@ def create_hosted_server(client: GatewayClient, settings: HostedSettings) -> Fas
             confirm_gateway_url=confirm_gateway_url,
         )
 
-    @mcp.tool(annotations=DESTRUCTIVE, structured_output=True)
-    async def delete_model(
-        model_id: str,
-        confirm_model_id: str,
-        confirm_gateway_url: str,
-    ) -> dict[str, object]:
-        """Delete an inactive installed model after exact model and gateway confirmation."""
-        _require_scope(MANAGE_SCOPE)
-        return await client.delete_model(
-            model_id,
-            confirm_model_id=confirm_model_id,
-            confirm_gateway_url=confirm_gateway_url,
-        )
-
     @mcp.tool(annotations=MUTATION, structured_output=True)
     async def update_engine_config(
         engine: EngineName,
@@ -236,6 +233,11 @@ def main() -> None:
         create_server(GatewayClient(gateway_settings)).run(transport="stdio")
         return
     hosted_settings = HostedSettings.from_environment()
+    validate_hosted_gateway(
+        hosted_settings,
+        gateway_settings.normalized_url,
+        gateway_settings.token,
+    )
     create_hosted_server(GatewayClient(gateway_settings), hosted_settings).run(
         transport="streamable-http"
     )

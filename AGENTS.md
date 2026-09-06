@@ -73,7 +73,7 @@ Run `git diff --check` before committing.
 - `GatewayClient` owns one reusable `httpx.AsyncClient`; route gateway calls
   through its unified request helper and close it through the MCP lifespan.
 - Stdio keeps the original three-tool contract. Streamable HTTP exposes only
-  the nine approved gateway observation/management tools and never local file
+  the eight approved gateway observation/management tools and never local file
   transcription.
 - `get_gateway_status` uses public gateway health endpoints.
 - Hosted read tools require `gateway:read`; mutations require `gateway:manage`.
@@ -86,8 +86,8 @@ Run `git diff --check` before committing.
   caller to confirm the normalized gateway URL before the file is opened; it is
   registered only in stdio mode.
 - Hosted mutations require an exact normalized gateway confirmation. Model
-  deletion also requires exact model-id confirmation and rejects active or
-  downloading models.
+  deletion is excluded until the gateway can enforce an atomic inactive-state
+  check.
 - Do not add hosted transcription, transcript history, token administration,
   custom model URLs, or a Voca-hosted relay without an explicit product decision.
 - Coordinate changes to gateway paths or response shapes with

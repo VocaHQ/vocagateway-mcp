@@ -212,43 +212,6 @@ async def test_select_model_preflights_and_returns_resulting_engine() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("model", "message"),
-    [
-        ({"id": "small", "state": "installed", "active": True}, "active model"),
-        ({"id": "small", "state": "downloading", "active": False}, "downloading model"),
-        ({"id": "small", "state": "not_installed", "active": False}, "not installed"),
-    ],
-)
-async def test_delete_model_rejects_unsafe_state(model: dict, message: str) -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "GET"
-        return httpx.Response(200, json=[model])
-
-    async with GatewayClient(SETTINGS, transport=transport_for(handler)) as client:
-        with pytest.raises(GatewayError, match=message):
-            await client.delete_model(
-                "small",
-                confirm_model_id="small",
-                confirm_gateway_url=SETTINGS.normalized_url,
-            )
-
-
-@pytest.mark.asyncio
-async def test_delete_model_requires_exact_id_before_network_access() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        raise AssertionError("network must not be used")
-
-    async with GatewayClient(SETTINGS, transport=transport_for(handler)) as client:
-        with pytest.raises(GatewayChangeConfirmationRequired, match="confirm_model_id"):
-            await client.delete_model(
-                "small",
-                confirm_model_id="other",
-                confirm_gateway_url=SETTINGS.normalized_url,
-            )
-
-
-@pytest.mark.asyncio
 async def test_model_mutation_rejects_path_like_id_before_network_access() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         raise AssertionError("network must not be used")
@@ -259,35 +222,6 @@ async def test_model_mutation_rejects_path_like_id_before_network_access() -> No
                 "../private-model",
                 confirm_gateway_url=SETTINGS.normalized_url,
             )
-
-
-@pytest.mark.asyncio
-async def test_delete_model_preflights_then_deletes() -> None:
-    methods: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        methods.append(request.method)
-        if request.method == "GET":
-            return httpx.Response(
-                200,
-                json=[{"id": "small", "state": "installed", "active": False}],
-            )
-        assert request.method == "DELETE"
-        return httpx.Response(200, json={"deleted": True})
-
-    async with GatewayClient(SETTINGS, transport=transport_for(handler)) as client:
-        result = await client.delete_model(
-            "small",
-            confirm_model_id="small",
-            confirm_gateway_url=SETTINGS.normalized_url,
-        )
-
-    assert methods == ["GET", "DELETE"]
-    assert result == {
-        "gateway_url": SETTINGS.normalized_url,
-        "model_id": "small",
-        "deleted": True,
-    }
 
 
 @pytest.mark.asyncio
