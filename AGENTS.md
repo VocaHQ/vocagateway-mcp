@@ -4,10 +4,9 @@ Instructions for coding agents in this repository.
 
 `vocagateway-mcp` is a thin MCP client for a user-operated
 [VocaGateway](https://github.com/VocaHQ/vocagateway). It does not perform speech
-inference itself. The current milestone is a local stdio server that reports
-gateway status, lists models, and sends a completed local audio file to the
-explicitly configured gateway. There is no Voca-hosted relay, account, or cloud
-transcription service.
+inference itself. It has a local stdio mode for completed-file transcription and
+an authenticated Streamable HTTP mode for gateway observation and management.
+There is no Voca-hosted relay, account, or cloud transcription service.
 
 ## Critical: git worktrees for every branch and PR
 
@@ -37,11 +36,14 @@ Rules:
 | Path | Role |
 | --- | --- |
 | `src/vocagateway_mcp/client.py` | Configuration, HTTP client, destination confirmation, safe errors |
-| `src/vocagateway_mcp/server.py` | FastMCP tools and stdio entry point |
+| `src/vocagateway_mcp/hosting.py` | Hosted settings, network validation, and bearer-token scopes |
+| `src/vocagateway_mcp/server.py` | Transport-specific FastMCP tools and entry point |
 | `tests/` | Unit tests using `httpx.MockTransport`; no live gateway required |
 | `scripts/inspect-local.sh` | Local MCP Inspector launcher using the gateway token file |
 | `scripts/smoke_stdio.py` | Installed-wheel MCP initialize and tool-list smoke test |
-| `Dockerfile` | Stdio container image |
+| `scripts/smoke_http.py` | Installed-wheel Streamable HTTP auth and tool-list smoke test |
+| `docs/hosted-management.md` | Accepted hosted tool, scope, and safety contract |
+| `Dockerfile` | Stdio or Streamable HTTP container image |
 | `.github/workflows/quality.yml` | Python/package/protocol and container CI gates |
 
 ## Setup and commands
@@ -57,6 +59,7 @@ uv run pytest
 
 uv build --wheel
 uv run python scripts/smoke_stdio.py .venv/bin/vocagateway-mcp
+uv run python scripts/smoke_http.py .venv/bin/vocagateway-mcp
 docker build --tag vocagateway-mcp:test .
 ```
 
@@ -69,14 +72,24 @@ Run `git diff --check` before committing.
   adapters so a future Streamable HTTP transport can reuse the same client.
 - `GatewayClient` owns one reusable `httpx.AsyncClient`; route gateway calls
   through its unified request helper and close it through the MCP lifespan.
-- Stdio is the only supported MCP transport in the current milestone.
+- Stdio keeps the original three-tool contract. Streamable HTTP exposes only
+  the nine approved gateway observation/management tools and never local file
+  transcription.
 - `get_gateway_status` uses public gateway health endpoints.
-- `list_models` is read-only but uses the configured gateway bearer token.
+- Hosted read tools require `gateway:read`; mutations require `gateway:manage`.
+- Hosted responses must omit gateway filesystem paths, credentials, and metric
+  history that is not part of the approved contract.
+- The hosted server uses stateless JSON responses, a one-MiB request cap,
+  explicit Host/Origin allowlists, and pre-shared bearer tokens.
+- `list_models` and all admin operations use the configured gateway bearer token.
 - `transcribe_file` uses `POST /v1/audio/transcriptions` and must require the
-  caller to confirm the normalized gateway URL before the file is opened.
-- Do not add streaming transcription, token administration, model mutations,
-  arbitrary URL ingestion, or a hosted Voca relay without an explicit product
-  decision.
+  caller to confirm the normalized gateway URL before the file is opened; it is
+  registered only in stdio mode.
+- Hosted mutations require an exact normalized gateway confirmation. Model
+  deletion also requires exact model-id confirmation and rejects active or
+  downloading models.
+- Do not add hosted transcription, transcript history, token administration,
+  custom model URLs, or a Voca-hosted relay without an explicit product decision.
 - Coordinate changes to gateway paths or response shapes with
   `VocaHQ/vocagateway`; do not silently invent compatibility behavior.
 
@@ -95,8 +108,7 @@ or transcripts. Do not weaken destination confirmation, bearer authentication,
 timeouts, upload controls, or error redaction without explicit review.
 
 Local file access must remain bounded to the path the caller supplied. Hosted
-transport work must define a remote-safe audio input contract; a path on the MCP
-server is not the remote user's local file.
+mode must not register any tool that accepts audio or a filesystem path.
 
 ## Python conventions and tests
 
@@ -114,8 +126,8 @@ server is not the remote user's local file.
 ## CI, commits, and pull requests
 
 `quality.yml` runs on pushes to `main`, non-draft PRs, and manual dispatch. It
-checks the lockfile, Ruff, pytest, a clean wheel install, an MCP stdio handshake,
-and the Docker build.
+checks the lockfile, Ruff, pytest, a clean wheel install, stdio and authenticated
+Streamable HTTP handshakes, and the Docker build.
 
 Use Conventional Commits: `feat`, `fix`, `docs`, `test`, `ci`, `refactor`,
 `build`, or `chore`. PR descriptions should include:

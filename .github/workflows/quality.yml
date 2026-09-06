@@ -40,9 +40,11 @@ jobs:
             --python /tmp/vocagateway-mcp-wheel/bin/python \
             dist/*.whl
       - name: Smoke-test installed MCP server
-        run: >-
-          uv run python scripts/smoke_stdio.py
-          /tmp/vocagateway-mcp-wheel/bin/vocagateway-mcp
+        run: |
+          uv run python scripts/smoke_stdio.py \
+            /tmp/vocagateway-mcp-wheel/bin/vocagateway-mcp
+          uv run python scripts/smoke_http.py \
+            /tmp/vocagateway-mcp-wheel/bin/vocagateway-mcp
 
   container:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
