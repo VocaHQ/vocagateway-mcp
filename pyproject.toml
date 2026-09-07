@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vocagateway-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Private MCP server for a self-hosted VocaGateway"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "VocaHQ" }]
 dependencies = [
   "httpx>=0.28,<1",
-  "mcp>=1.16,<2",
+  "mcp>=1.29.1,<2",
 ]
 
 [project.scripts]

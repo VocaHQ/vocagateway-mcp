@@ -733,7 +733,7 @@ wheels = [
 
 [[package]]
 name = "vocagateway-mcp"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -750,7 +750,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "mcp", specifier = ">=1.16,<2" },
+    { name = "mcp", specifier = ">=1.29.1,<2" },
 ]
 
 [package.metadata.requires-dev]

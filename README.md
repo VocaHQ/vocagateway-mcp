@@ -3,7 +3,7 @@
 # vocagateway-mcp
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Status: local v0.1](https://img.shields.io/badge/status-local%20v0.1-yellow)](#current-scope)
+[![Status: v0.2](https://img.shields.io/badge/status-v0.2-yellow)](#current-scope)
 [![Privacy: self-hosted](https://img.shields.io/badge/privacy-self--hosted-success)](#privacy-and-security)
 
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/VocaHQ/vocagateway-mcp/pulls)
@@ -14,9 +14,9 @@
 </div>
 
 MCP tools for a [VocaGateway](https://github.com/VocaHQ/vocagateway) you run.
-The server lets an MCP client inspect gateway readiness and models, then send a
-completed local audio file to that explicitly configured gateway for
-transcription.
+Local stdio mode can inspect the gateway and send a completed local audio file.
+Authenticated Streamable HTTP mode lets remote agents observe and manage the
+gateway without accepting audio or exposing gateway credentials.
 
 This is not the speech engine and it is not on-device dictation. Audio leaves
 the machine running the MCP server and goes only to the VocaGateway URL the user
@@ -25,8 +25,14 @@ service.
 
 ## Current scope
 
-The v0.1 milestone is a **local stdio MCP server**. A self-hosted Streamable HTTP
-transport may reuse the same client core later, but is not implemented yet.
+Two transport-specific modes are available:
+
+- **Local stdio:** the original status, model-list, and completed-file
+  transcription tools.
+- **Streamable HTTP:** eight authenticated gateway observation and management
+  tools. It does not expose transcription or local filesystem access.
+
+### Local stdio tools
 
 | Tool | Purpose | Gateway access |
 | --- | --- | --- |
@@ -38,9 +44,25 @@ transport may reuse the same client core later, but is not implemented yet.
 destination before it opens the file. This gives the MCP host a chance to show
 where audio will be sent and prevents an unnoticed destination change.
 
-Not included in v0.1: live transcription streaming, token administration, model
-download/delete/select, transcript history, arbitrary URL ingestion, or a Voca
-cloud relay.
+### Hosted management tools
+
+| Tool | Required scope | Purpose |
+| --- | --- | --- |
+| `get_gateway_status` | `gateway:read` | Read destination, readiness, and active engine |
+| `get_gateway_config` | `gateway:read` | Read engine and compute configuration without filesystem paths |
+| `list_models` | `gateway:read` | Filter the catalog and inspect install/progress/capability state |
+| `get_operational_status` | `gateway:read` | Read redacted system, dependency, queue, latency, and readiness state |
+| `download_model` | `gateway:manage` | Start a catalog model download |
+| `cancel_model_download` | `gateway:manage` | Cancel an active model download |
+| `select_model` | `gateway:manage` | Activate an installed model and wait for warmup |
+| `update_engine_config` | `gateway:manage` | Change engine and compute settings |
+
+Hosted mutations require `confirm_gateway_url` to match the configured gateway.
+Model deletion remains unavailable until VocaGateway provides an atomic endpoint
+that refuses to delete active or downloading models.
+
+Not included: hosted transcription, live transcription streaming, transcript
+history, token administration, custom model URLs, or a Voca cloud relay.
 
 ## Requirements
 
@@ -59,7 +81,8 @@ uv sync --locked --all-groups
 ```
 
 Configure the gateway destination and token in the MCP host environment. Do not
-put either value in source control:
+put either value in source control. Hosted mode requires HTTPS for a non-loopback
+gateway destination:
 
 ```sh
 export VOCAGATEWAY_URL=http://127.0.0.1:8765
@@ -76,6 +99,51 @@ manual launch.
 | --- | --- | --- |
 | `VOCAGATEWAY_URL` | Yes | Absolute `http` or `https` gateway URL; credentials in the URL are rejected |
 | `VOCAGATEWAY_TOKEN` | Yes | Existing gateway bearer token; never included in returned errors |
+
+## Run the hosted management server
+
+Generate separate, random MCP tokens; do not reuse the VocaGateway bearer token:
+
+```sh
+export VOCAGATEWAY_URL=https://gateway.example.com
+export VOCAGATEWAY_TOKEN='private-gateway-service-token'
+
+export VOCAMCP_PUBLIC_URL=https://mcp.example.com/mcp
+export VOCAMCP_HOST=0.0.0.0
+export VOCAMCP_PORT=8000
+export VOCAMCP_ACCESS_TOKEN='random-manage-token-at-least-32-characters'
+export VOCAMCP_READ_ONLY_TOKEN='different-read-token-at-least-32-characters'
+export VOCAMCP_ALLOWED_HOSTS=mcp.example.com
+
+uv run vocagateway-mcp --transport streamable-http
+```
+
+The endpoint is `/mcp`; unauthenticated process health is `/health`. The manage
+token receives `gateway:read` and `gateway:manage`. The optional read-only token
+receives only `gateway:read`. Every MCP request must send one as an
+`Authorization: Bearer ...` header.
+
+| Hosted variable | Required | Purpose |
+| --- | --- | --- |
+| `VOCAMCP_ACCESS_TOKEN` | Yes | Pre-shared manage token, at least 32 characters |
+| `VOCAMCP_READ_ONLY_TOKEN` | No | Distinct pre-shared read-only token |
+| `VOCAMCP_PUBLIC_URL` | Remote deployments | Absolute public endpoint ending in `/mcp` |
+| `VOCAMCP_HOST` | No | Bind host; defaults to `127.0.0.1` |
+| `VOCAMCP_PORT` | No | Bind port; defaults to `8000` |
+| `VOCAMCP_ALLOWED_HOSTS` | No | Comma-separated HTTP Host allowlist; defaults to the public authority |
+| `VOCAMCP_ALLOWED_ORIGINS` | Browser clients only | Comma-separated browser Origin allowlist |
+
+Non-loopback deployments require an HTTPS public URL. Terminate TLS in a trusted
+reverse proxy or private-network ingress and forward traffic to the MCP process.
+The server enables DNS-rebinding protection and accepts request bodies up to one
+MiB because hosted tools carry management JSON, not audio. Outbound gateway
+requests do not inherit ambient HTTP proxy settings.
+
+This release uses operator-provisioned bearer tokens. It publishes MCP protected
+resource metadata but does not implement an interactive authorization server or
+issue tokens. Configure the token manually in the MCP client. A deployment that
+requires browser-based OAuth should integrate a real authorization server before
+public availability.
 
 ## Test with MCP Inspector
 
@@ -104,8 +172,8 @@ In the Inspector:
 }
 ```
 
-The audio path is local to the machine running this stdio MCP server. A hosted
-server will need a different, remote-safe audio input contract.
+The audio path is local to the machine running this stdio MCP server. Hosted
+management mode intentionally does not register an audio or filesystem tool.
 
 ### Error guidance
 
@@ -141,16 +209,18 @@ tool discovery:
 ```sh
 uv build --wheel
 uv run python scripts/smoke_stdio.py .venv/bin/vocagateway-mcp
+uv run python scripts/smoke_http.py .venv/bin/vocagateway-mcp
 ```
 
 Tests use `httpx.MockTransport`; they do not require a live gateway, speech
 engine, recording, or network connection. GitHub Actions repeats lint, format,
-unit, clean-wheel install, stdio protocol smoke, and container-build checks.
+unit, clean-wheel install, stdio and authenticated Streamable HTTP protocol
+smokes, and container-build checks.
 
 ## Container
 
-The image currently exposes the same stdio server. Pass secrets at runtime, not
-at build time:
+The image can run either transport. Pass secrets at runtime, not at build time.
+For stdio:
 
 ```sh
 docker build --tag vocagateway-mcp:dev .
@@ -158,6 +228,21 @@ docker run --rm -i \
   -e VOCAGATEWAY_URL \
   -e VOCAGATEWAY_TOKEN \
   vocagateway-mcp:dev
+```
+
+For Streamable HTTP behind an HTTPS ingress:
+
+```sh
+docker run --rm \
+  -p 127.0.0.1:8000:8000 \
+  -e VOCAGATEWAY_URL \
+  -e VOCAGATEWAY_TOKEN \
+  -e VOCAMCP_PUBLIC_URL \
+  -e VOCAMCP_ACCESS_TOKEN \
+  -e VOCAMCP_READ_ONLY_TOKEN \
+  -e VOCAMCP_ALLOWED_HOSTS \
+  -e VOCAMCP_HOST=0.0.0.0 \
+  vocagateway-mcp:dev --transport streamable-http
 ```
 
 For a gateway running on the macOS host, remember that `127.0.0.1` inside Docker
@@ -168,9 +253,13 @@ is the container itself. Use an explicitly configured host address such as
 
 ```text
 MCP host
-  └── stdio → vocagateway-mcp
-                 └── HTTP + bearer token → user-operated VocaGateway
-                                                └── selected local speech engine
+  ├── stdio → local vocagateway-mcp ── file transcription ─┐
+  └── HTTPS → hosted vocagateway-mcp ── management only ───┤
+                                                          ▼
+                                              user-operated VocaGateway
+                                                          │
+                                                          ▼
+                                               selected speech engine
 ```
 
 `GatewayClient` contains configuration, validation, and redacted errors. It owns
@@ -178,18 +267,22 @@ one reusable `httpx.AsyncClient`, so status checks, model discovery, and uploads
 share connection pooling and one request/error path. The FastMCP lifespan closes
 that client cleanly when the server exits.
 
-The FastMCP tool layer is deliberately thin so a future authenticated Streamable
-HTTP transport can reuse the same gateway behavior without duplicating it.
+The FastMCP layers are transport-specific: local stdio retains file
+transcription, while hosted Streamable HTTP exposes only management tools. Both
+reuse the same gateway client and safe error behavior.
 
 ## Privacy and security
 
 - The server does not log bearer tokens, audio bytes, or transcript content.
+- Hosted MCP tokens and the gateway token are separate credentials.
+- Hosted responses omit gateway filesystem paths and raw metric history.
+- Read-only callers cannot execute model or engine mutations.
+- Host and browser Origin allowlists are enforced before MCP tools run.
 - Gateway response bodies are not echoed in HTTP errors.
 - Audio is not opened until its destination URL is confirmed.
 - URL credentials and empty tokens are rejected during configuration.
 - Tests contain no real recordings, transcripts, tokens, or private hostnames.
-- A local HTTP deployment should bind to `127.0.0.1`; a future remote MCP mode
-  must require authentication, TLS or a private network, and Origin/Host checks.
+- Remote MCP deployments require an HTTPS public URL and bearer authentication.
 
 See [AGENTS.md](AGENTS.md) for contributor and coding-agent rules.
 
