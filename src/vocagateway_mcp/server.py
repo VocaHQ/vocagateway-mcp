@@ -6,7 +6,7 @@ import argparse
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings
@@ -14,6 +14,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
+from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -43,6 +44,29 @@ MaximumSize = Literal["100mb", "300mb", "800mb", "1500mb"]
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)
 MUTATION = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True)
+
+
+class HostedFastMCP(FastMCP):
+    """Keep shared gateway resources alive for the whole hosted application."""
+
+    def __init__(self, name: str, gateway_client: GatewayClient, **kwargs: Any) -> None:
+        self._gateway_client = gateway_client
+        super().__init__(name, **kwargs)
+
+    def streamable_http_app(self) -> Starlette:
+        app = super().streamable_http_app()
+        session_lifespan = app.router.lifespan_context
+
+        @asynccontextmanager
+        async def lifespan(application: Starlette) -> AsyncIterator[None]:
+            async with session_lifespan(application):
+                try:
+                    yield
+                finally:
+                    await self._gateway_client.aclose()
+
+        app.router.lifespan_context = lifespan
+        return app
 
 
 def create_server(client: GatewayClient) -> FastMCP:
@@ -90,15 +114,9 @@ def create_hosted_server(client: GatewayClient, settings: HostedSettings) -> Fas
         client.settings.token,
     )
 
-    @asynccontextmanager
-    async def lifespan(_: FastMCP) -> AsyncIterator[None]:
-        try:
-            yield
-        finally:
-            await client.aclose()
-
-    mcp = FastMCP(
+    mcp = HostedFastMCP(
         "VocaGateway",
+        client,
         instructions=(
             "Manage the configured VocaGateway. Read current state before changing it, show "
             "the gateway URL and proposed change to the user, and obtain approval before "
@@ -121,7 +139,6 @@ def create_hosted_server(client: GatewayClient, settings: HostedSettings) -> Fas
             allowed_hosts=list(settings.allowed_hosts),
             allowed_origins=list(settings.allowed_origins),
         ),
-        lifespan=lifespan,
     )
 
     @mcp.custom_route("/health", methods=["GET"])

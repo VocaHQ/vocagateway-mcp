@@ -119,6 +119,46 @@ async def test_hosted_http_accepts_read_only_token_and_lists_management_tools() 
 
 
 @pytest.mark.asyncio
+async def test_hosted_gateway_client_remains_open_across_stateless_requests() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"engine": "test", "engine_ready": True})
+        assert request.url.path == "/health/ready"
+        return httpx.Response(200, json={"status": "ready", "warmup_state": "complete"})
+
+    client = GatewayClient(GATEWAY_SETTINGS, transport=httpx.MockTransport(handler))
+    mcp = create_hosted_server(client, HOSTED_SETTINGS)
+    app = mcp.streamable_http_app()
+    headers = {
+        "authorization": "Bearer read-token-with-at-least-thirty-two-characters",
+        "accept": "application/json, text/event-stream",
+    }
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://127.0.0.1:8000",
+        ) as http:
+            initialized = await http.post("/mcp", headers=headers, json=_initialize_request())
+            status = await http.post(
+                "/mcp",
+                headers=headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": "get_gateway_status", "arguments": {}},
+                },
+            )
+
+    assert initialized.status_code == 200
+    assert status.status_code == 200
+    result = status.json()["result"]
+    assert result["isError"] is False
+    assert result["structuredContent"]["readiness"] == "ready"
+    assert client._http.is_closed is True
+
+
+@pytest.mark.asyncio
 async def test_read_only_token_cannot_call_management_tool() -> None:
     client = GatewayClient(GATEWAY_SETTINGS, transport=httpx.MockTransport(lambda _: None))
     mcp = create_hosted_server(client, HOSTED_SETTINGS)
