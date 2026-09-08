@@ -8,6 +8,11 @@ inference itself. It has a local stdio mode for completed-file transcription and
 an authenticated Streamable HTTP mode for gateway observation and management.
 There is no Voca-hosted relay, account, or cloud transcription service.
 
+## Commit attribution
+
+Agents must not add themselves as commit co-authors or add `Co-authored-by`
+trailers for agents.
+
 ## Critical: git worktrees for every branch and PR
 
 Never create a branch, commit, or open a pull request in the primary checkout.
